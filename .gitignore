@@ -1,0 +1,4 @@
+fuel-radar
+*.mmdb
+*.csv
+.DS_Store
