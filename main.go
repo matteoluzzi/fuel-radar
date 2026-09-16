@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -32,16 +33,35 @@ func locationHandler(svc *MaxmindService) http.HandlerFunc {
 	}
 }
 
+func gasStationHandler(svc *GasStationService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		municipality := r.URL.Query().Get("municipality")
+		if municipality == "" {
+			http.Error(w, "Missing municipality parameter", http.StatusBadRequest)
+			return
+		}
+
+		l := svc.findAllGasStationinMunicipality(strings.ToLower(municipality))
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(l); err != nil {
+			log.Printf("failed to write response: %s", err)
+		}
+
+	}
+}
+
 func main() {
-	svc := newService("GeoLite2-City.mmdb")
+	maxMindSvc := newMaxMindService("GeoLite2-City.mmdb")
+	gasStationSvc := newGasStationService()
 	defer func() {
-		if err := svc.Close(); err != nil {
+		if err := maxMindSvc.Close(); err != nil {
 			log.Printf("failed to close maxmind db: %s", err)
 		}
 	}()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/location", locationHandler(svc))
+	mux.HandleFunc("GET /api/location", locationHandler(maxMindSvc))
+	mux.HandleFunc("GET /api/station", gasStationHandler(&gasStationSvc))
 
 	server := &http.Server{
 		Addr:         ":8080",

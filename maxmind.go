@@ -31,7 +31,7 @@ type Response struct {
 	Lon  float64 `json:"lon"`
 }
 
-func newService(path string) *MaxmindService {
+func newMaxMindService(path string) *MaxmindService {
 
 	db, err := maxminddb.Open(path)
 	if err != nil {
