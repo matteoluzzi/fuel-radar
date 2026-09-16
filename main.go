@@ -3,55 +3,57 @@ package main
 import (
 	"encoding/json"
 	"log"
-	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
 
-func locationHandler(svc *MaxmindService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ip := r.URL.Query().Get("ip")
-		if ip == "" {
-			host, _, err := net.SplitHostPort(r.RemoteAddr)
-			if err != nil {
-				host = r.RemoteAddr
-			}
-			ip = host
-		}
-
-		resp, err := svc.resolveIp(ip)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			log.Printf("failed to write response: %s", err)
-		}
-	}
-}
+var fuelTypes = []string{"gasolio", "benzina", "metano", "gpl"}
 
 func gasStationHandler(svc *GasStationService, maxmind *MaxmindService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
+		municipality := r.URL.Query().Get("municipality")
 		ip := r.URL.Query().Get("ip")
 		var input Coordinates
 
-		if ip == "" {
-			//fallback on municipality
-			municipality := r.URL.Query().Get("municipality")
-			if municipality == "" {
-				http.Error(w, "Missing municipality parameter", http.StatusBadRequest)
+		switch {
+		case municipality != "":
+			input.City = strings.ToLower(municipality)
+		case ip != "":
+			resolved, err := maxmind.resolveIp(ip)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			input.City = strings.ToLower(municipality)
-		} else {
-			input, _ = maxmind.resolveIp(ip)
+			input = resolved
+		default:
+			//fallback on resolving the client ip from the request
+			parsedIP, err := fetchClientIP(r, 1, "X-Forwarded-For")
+			if err != nil {
+				http.Error(w, "Missing municipality/ip parameter and cannot resolve client IP", http.StatusBadRequest)
+				return
+			}
+			resolved, err := maxmind.resolveIp(parsedIP.String())
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			input = resolved
 		}
 
-		l := svc.findCheapestGasStationInProximity(input, "Gasolio")
+		fuelType := r.URL.Query().Get("type")
+		if fuelType == "" {
+			http.Error(w, "Missing type parameter", http.StatusBadRequest)
+			return
+		}
+		if !slices.Contains(fuelTypes, strings.ToLower(fuelType)) {
+			http.Error(w, "Invalid type parameter", http.StatusBadRequest)
+			return
+		}
+
+		l := svc.findCheapestGasStationInProximity(input, strings.ToLower(fuelType))
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(l); err != nil {
 			log.Printf("failed to write response: %s", err)
@@ -70,7 +72,6 @@ func main() {
 	}()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/location", locationHandler(maxMindSvc))
 	mux.HandleFunc("GET /api/station", gasStationHandler(gasStationSvc, maxMindSvc))
 
 	server := &http.Server{
