@@ -33,15 +33,25 @@ func locationHandler(svc *MaxmindService) http.HandlerFunc {
 	}
 }
 
-func gasStationHandler(svc *GasStationService) http.HandlerFunc {
+func gasStationHandler(svc *GasStationService, maxmind *MaxmindService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		municipality := r.URL.Query().Get("municipality")
-		if municipality == "" {
-			http.Error(w, "Missing municipality parameter", http.StatusBadRequest)
-			return
+
+		ip := r.URL.Query().Get("ip")
+		var input Coordinates
+
+		if ip == "" {
+			//fallback on municipality
+			municipality := r.URL.Query().Get("municipality")
+			if municipality == "" {
+				http.Error(w, "Missing municipality parameter", http.StatusBadRequest)
+				return
+			}
+			input.City = strings.ToLower(municipality)
+		} else {
+			input, _ = maxmind.resolveIp(ip)
 		}
 
-		l := svc.findAllGasStationinMunicipality(strings.ToLower(municipality))
+		l := svc.findCheapestGasStationInProximity(input, "Gasolio")
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(l); err != nil {
 			log.Printf("failed to write response: %s", err)
@@ -61,7 +71,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/location", locationHandler(maxMindSvc))
-	mux.HandleFunc("GET /api/station", gasStationHandler(&gasStationSvc))
+	mux.HandleFunc("GET /api/station", gasStationHandler(gasStationSvc, maxMindSvc))
 
 	server := &http.Server{
 		Addr:         ":8080",

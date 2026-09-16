@@ -10,6 +10,7 @@ import (
 )
 
 const stationFieldCount = 10
+const maxDistanceInKm = 5
 
 // gestori.prezzibenzina.it is a stray attribution suffix that some source
 // records leak into a free-text field (e.g. "STOIL SIMPLE | gestori.prezzibenzina.it"),
@@ -46,7 +47,7 @@ type GasStationService struct {
 	StationList GasStationList
 }
 
-func newGasStationService() GasStationService {
+func newGasStationService() *GasStationService {
 	priceListRows, err := readCsvFile("gas_station_data/prezzo_alle_8.csv")
 	if err != nil {
 		log.Fatal(err)
@@ -60,7 +61,7 @@ func newGasStationService() GasStationService {
 	priceListById := parsePriceList(priceListRows)
 	stationList := parseGasStations(stationRows, priceListById)
 
-	return GasStationService{
+	return &GasStationService{
 		StationList: GasStationList{List: stationList},
 	}
 }
@@ -209,4 +210,22 @@ func (svc GasStationService) findAllGasStationinMunicipality(municipality string
 		}
 	}
 	return result
+}
+
+func (svc GasStationService) findCheapestGasStationInProximity(input Coordinates, gasType string) GasStation {
+
+	var gasStationsInProximity []GasStation
+
+	if input.Lat == 0 || input.Lon == 0 {
+		//Use the city
+		gasStationsInProximity = svc.findAllGasStationinMunicipality(input.City)
+	} else {
+		for _, gs := range svc.StationList.List {
+			if maxDistanceInKm > calculateDistance(input.Lat, input.Lon, gs.Latitude, gs.Longitude) {
+				gasStationsInProximity = append(gasStationsInProximity, gs)
+			}
+		}
+	}
+
+	return findCheapestGasType(gasStationsInProximity, gasType)
 }

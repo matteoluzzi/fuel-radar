@@ -24,3 +24,39 @@ func calculateDistance(fromLat float64, fromLon float64, toLat float64, toLon fl
 
 	return float32(R * c)
 }
+
+func findCheapestGasType(stations []GasStation, gasType string) GasStation {
+
+	var cheapest GasStation
+	price := float32(math.MaxFloat32)
+
+	for _, gs := range stations {
+		isCheaper, p := isCheaperThan(price, gs, gasType)
+		if isCheaper {
+			cheapest = gs
+			price = p
+		}
+	}
+
+	return cheapest
+
+}
+
+func isCheaperThan(price float32, compare GasStation, gasType string) (bool, float32) {
+
+	potentialNewPrice := float32(math.MaxFloat32)
+
+	for _, pl := range compare.PumpList {
+		if pl.Type == gasType {
+			if pl.Price < potentialNewPrice {
+				potentialNewPrice = pl.Price
+			}
+		}
+	}
+
+	if potentialNewPrice < price {
+		return true, potentialNewPrice
+	}
+
+	return false, price
+}
