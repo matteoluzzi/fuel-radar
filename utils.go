@@ -2,13 +2,46 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
+	"os"
 	"strings"
+	"time"
+	_ "time/tzdata"
 )
 
 const R = float64(6_371) //Earth radius in km
+
+const tmpFolderName = "/tmp"
+
+const pricesDatasetUrl = "https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv"
+const gasStationsDatasetUrl = "https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv"
+
+// datasetTimezone is the zone the mimit.gov.it datasets are published in;
+// using it (rather than the server's local zone) keeps the 8am cutoff
+// correct across the CEST/CET transition.
+var datasetTimezone = mustLoadLocation("Europe/Rome")
+
+func mustLoadLocation(name string) *time.Location {
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		panic(err)
+	}
+	return loc
+}
+
+// lastDatasetUpdateTime returns the most recent 8am (datasetTimezone) at or
+// before now, i.e. the publish time of the freshest dataset available.
+func lastDatasetUpdateTime(now time.Time) time.Time {
+	local := now.In(datasetTimezone)
+	cutoff := time.Date(local.Year(), local.Month(), local.Day(), 8, 0, 0, 0, datasetTimezone)
+	if local.Before(cutoff) {
+		cutoff = cutoff.AddDate(0, 0, -1)
+	}
+	return cutoff
+}
 
 // Implement the Haversine function
 func calculateDistance(fromLat float64, fromLon float64, toLat float64, toLon float64) float32 {
@@ -107,4 +140,62 @@ func fetchClientIP(r *http.Request, hops int, trueIPHeader string) (net.IP, erro
 	}
 
 	return parsedIP, nil
+}
+
+func downloadDatasetIfNeeded() error {
+
+	if err := downloadDatasetFileIfStale(pricesDatasetUrl, tmpFolderName+"/prezzo_alle_8.csv"); err != nil {
+		return err
+	}
+
+	return downloadDatasetFileIfStale(gasStationsDatasetUrl, tmpFolderName+"/anagrafica_impianti_attivi.csv")
+}
+
+// downloadDatasetFileIfStale re-downloads the dataset at path unless it was
+// last downloaded after the most recent 8am publish time, in which case the
+// file on disk is already the latest version.
+func downloadDatasetFileIfStale(dsUrl string, path string) error {
+
+	f, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return downloadDataset(dsUrl, path)
+	} else if err != nil {
+		return err
+	}
+
+	if f.ModTime().Before(lastDatasetUpdateTime(time.Now())) {
+		return downloadDataset(dsUrl, path)
+	}
+
+	return nil
+}
+
+func downloadDataset(dsUrl string, path string) (err error) {
+
+	r, err := http.Get(dsUrl)
+	if err != nil {
+		return fmt.Errorf("error downloading dataset at %s: %s", dsUrl, err.Error())
+	}
+	defer func() {
+		if cerr := r.Body.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
+	out, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
+	_, err = io.Copy(out, r.Body)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

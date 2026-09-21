@@ -48,12 +48,17 @@ type GasStationService struct {
 }
 
 func newGasStationService() *GasStationService {
-	priceListRows, err := readCsvFile("gas_station_data/prezzo_alle_8.csv")
+	err := downloadDatasetIfNeeded()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	stationRows, err := readCsvFile("gas_station_data/anagrafica_impianti_attivi.csv")
+	priceListRows, err := readCsvFile(tmpFolderName + "/prezzo_alle_8.csv")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	stationRows, err := readCsvFile(tmpFolderName + "/anagrafica_impianti_attivi.csv")
 	if err != nil {
 		log.Fatal(err)
 	}
